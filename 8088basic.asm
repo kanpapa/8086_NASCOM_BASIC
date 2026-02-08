@@ -7,144 +7,97 @@
 ;	Assembler: asm86.com/asm86.cmd
 ;
 
-	CPU	8086
-	ASSUME	CS:CODE, DS:DATA, SS:DATA, ES:NOTHING
+;	CPU	8086
+;	ASSUME	CS:CODE, DS:DATA, SS:DATA, ES:NOTHING
 
-RAM	EQU	0000h	; RAM top
-ROM	EQU	8000h	; Rom top
-SYSSTK	EQU	0500h	; Stack top
-EMEM	EQU	0000h	; Memory top in emulation mode
-EMROM	EQU	8200h	; Start address in emulation mode
+cpu 8086
+bits 16
 
-RAMTOP	EQU	0800h 	; BASIC Work space
+;RAM	EQU	0000h	; RAM top
+;ROM	EQU	8000h	; Rom top
+;SYSSTK	EQU	0500h	; Stack top
+;EMEM	EQU	0000h	; Memory top in emulation mode
+;EMROM	EQU	8200h	; Start address in emulation mode
 
-REGAD	EQU	00h	; 8251 data register
-REGAC	EQU	01h	; 8251 control register
-RTSHIG	EQU	17h	; RTS high
-RTSLOW	EQU	37h	; RTS low
+;RAMTOP	EQU	0800h 	; BASIC Work space
+
+;REGAD	EQU	00h	; 8251 data register
+;REGAC	EQU	01h	; 8251 control register
+;RTSHIG	EQU	17h	; RTS high
+;RTSLOW	EQU	37h	; RTS low
 ;
 BUFSIZ	EQU	128		; Buffer size(2^n, max128)
 FULSIZ	EQU	BUFSIZ*14/16	; Buffer almost full
 ;
+REGAD   equ     0xd8        ; uPD71051 data
+REGAC   equ     0xda        ; uPD71051 control
+; データとスタックは セグメント 0x0000 に配置
+RAMTOP  equ     0x4000      ; 変数・ワークエリアの開始位置
+SYSSTK  equ     0xFFF0      ; スタックはメモリの一番上（偶数アドレス推奨）
 ;
 ;	dseg
-	SEGMENT	DATA
-	ORG	RAM
+;	SEGMENT	DATA
+;	ORG	RAM
 ;
 ;	Interrupt vector
-DEVERR	DS	4	; Devide error
-BRK_FLG	DS	4	; Break flag
-NMIREQ	DS	4	; Non maskable interrupt
-BR3INS	DS	4	; BRK3 instruction
-BRVINS	DS	4	; BRKV instruction
-CHKINS	DS	4	; CHKIND instruction
+;DEVERR	DS	4	; Devide error
+;BRK_FLG	DS	4	; Break flag
+;NMIREQ	DS	4	; Non maskable interrupt
+;BR3INS	DS	4	; BRK3 instruction
+;BRVINS	DS	4	; BRKV instruction
+;CHKINS	DS	4	; CHKIND instruction
 
-	ORG	0400h-20
-VGETCH	DS	4	; CALLN 251
-VKBHIT	DS	4	; CALLN 252
-VPUTCH	DS	4	; CALLN 253
-VBRKEM	DS	4	; BRKEM 254
-INTREQ	DS	4	; External interrupt
+;	ORG	0400h-20
+;VGETCH	DS	4	; CALLN 251
+;VKBHIT	DS	4	; CALLN 252
+;VPUTCH	DS	4	; CALLN 253
+;VBRKEM	DS	4	; BRKEM 254
+;INTREQ	DS	4	; External interrupt
 ;
 ;	Receive buffer
-RECBUF	DS	BUFSIZ	; Buffer
-RBFRDP	DS	2	; Read address
-RBFWTP	DS	2	; Write address
-RBFCNT	DS	1	; Count of chars
+;RECBUF	DS	BUFSIZ	; Buffer
+;RBFRDP	DS	2	; Read address
+;RBFWTP	DS	2	; Write address
+;RBFCNT	DS	1	; Count of chars
 ;
+
+
+
+section .text
+org 0x0000                  ; モニターで g 8000 0000 する場合
 ;	cseg
-	SEGMENT	CODE
-	ORG	ROM
-;
-;	8251 -> buffer by interrupt
-;
-intsr:
-	push	ax		; Save ax
-	push	bx		; Save bx
-	in	al,REGAD	; Get char
-	mov	ah,al		; Save it
-;
-	mov	al,[RBFCNT]	; Get count of chars
-	cmp	al,BUFSIZ	; Buffer full?
-	jz	isext		; If yes, ignore
-	inc	al		; Count up
-	mov	[RBFCNT],al	; Update
-	cmp	al,FULSIZ	; Buffer almost full?
-	jnz	isst1		; If no, skip flow control
-	mov	al,RTSHIG	; RTS control
-	out	REGAC,al	; Out it
-;
-isst1:
-	mov	bx,[RBFWTP]	; Get write point
-	mov	al,ah		; Restore char
-	mov	[bx],al		; Write char into buffer
-;
-	inc	bl		; Next write point
-	and	bl,BUFSIZ-1	; Wrap
-	mov	[RBFWTP],bx	; Update
-;
-isext:
-	pop	bx		; Restore bx
-	pop	ax		; Restore ax
-	sti			; Enable interrupt
-	iret
-;
-;	buffer -> al
+;	SEGMENT	CODE
+;	ORG	ROM
+
+	jmp	start
+
 getch:
-	push	bx		; Save bx
-;
-gcst1:
-	mov	al,[RBFCNT]	; Get count of chars
-	cmp	al,0		; Buffer enpty?
-	jz	gcst1		; If yes, wait
-	cli			; Disable interrupt
-;
-	mov	al,[RBFCNT]	; Critical timing measures
-	cmp	al,FULSIZ	; Need flow control?
-	jnz	gcst2		; If no, skip flow control
-	mov	ah,al		; Save char
-	mov	al,RTSLOW	; RTS control
-	out	REGAC,al	; Out it
-	mov	al,ah		; Restore char
-gcst2:
-	dec	AL		; Count down
-	mov	[RBFCNT],al	; Update
-;
-	mov	bx,[RBFRDP]	; Get read point
-	mov	al,[bx]		; Read char from buffer
-;
-	inc	bl		; Next read point
-	and	bl,BUFSIZ-1	; Wrap
-	mov	[RBFRDP],bx	; Update
-;
-	pop	bx		; Restore bx
-	sti			; Enable interrupt
-	ret
-;
-;	al -> 8251
+    in      al, REGAC       ;
+    test    al, 02h         ; RxRDY ビット確認
+    jz      getch           ;
+    in      al, REGAD       ;
+    ret
+
 putch:
-	push	ax		; Save char
-;
+    push    ax              ;
 pcst1:
-	in	al,REGAC	; Get status
-	and	al,01h		; check TxBUF enpty
-	jz	pcst1		; wait for empty
-;
-	pop	ax		; Restore char
-	out	REGAD,al	; Out it
-	ret
-;
-;	put string
+    in      al, REGAC       ;
+    test    al, 01h         ; TxRDY ビット確認
+    jz      pcst1           ;
+    pop     ax              ;
+    out     REGAD, al       ;
+    ret
+
 puts:
-	cld			; set DF for SI increment
+    cld                     ;
 ptst1:
-	lodsb			; get data to AL and SI++
-	cmp	al,00h		; check tail
-	jz	ptext		; if tail, return
-	call	putch		; display a charactor
-	jmp	ptst1		; loop until tail
+    lodsb                ; 【重要】NASM構文。文字列はコード領域(CS)にあるため
+    cmp     al, 0           ;
+    jz      ptext           ;
+    call    putch           ;
+    jmp     ptst1           ;
 ptext:
-	ret
+    ret
 ;;
 ;;	message
 ;ckcpu	db	13,10,'PROCESSOR: ',0
@@ -156,77 +109,30 @@ ptext:
 ;	db	'There is no code to run, so please reset.',13,10,0
 ;
 ;	CALLN wrapping
-ngetch:
-	call	getch		; Get a char
-	iret
-nkbhit:
-	mov	al,[RBFCNT]	; Get count of char
-	iret
-nputch:
-	call	putch		; Put a char
-	iret
+;ngetch:
+;	call	getch		; Get a char
+;	iret
+;nkbhit:
+;	mov	al,[RBFCNT]	; Get count of char
+;	iret
+;nputch:
+;	call	putch		; Put a char
+;	iret
 ;
 ;	Start
-start:	mov	ax,cs		; Set com model
-	mov	ds,ax		; Overlay ds with cs
-	mov	es,ax		; Overlay es with cs
-	mov	ss,ax		; Overlay ss with cs
-	mov	sp,SYSSTK	; Set stack
-;
-;	Vector 251-255 setup
-	mov	WORD PTR[VGETCH],ngetch
-	mov	[VGETCH+2],ax
-	mov	WORD PTR[VKBHIT],nkbhit
-	mov	[VKBHIT+2],ax
-	mov	WORD PTR[VPUTCH],nputch
-	mov	[VPUTCH+2],ax
-	mov	WORD PTR[VBRKEM],EMROM
-	mov	[VBRKEM+2],ax
-	mov	WORD PTR[INTREQ],intsr
-	mov	[INTREQ+2],ax
-;
-;	8251 setup
-	mov	dx,REGAC
-	mov	al,00h		; Default mode or no operation
-	out	dx,al		; Try command
-	out	dx,al		; Try command
-	out	dx,al		; Try command
-	mov	al,40h		; reset
-	out	dx,al		; Out it
-	mov	CX,16		; Delay
-	loop	$		; Delay
-	mov	al,4eh		; mode
-	out	dx,al		; Out it
-	mov	al,37h		; command
-	out	dx,al		; Out it
-;
-;	Buffer initialize
-	xor	al,al		; Clear al
-	mov	[RBFCNT],al	; Set count of chars
-	mov	ax,[RECBUF]	; Get buffer top
-	mov	[RBFRDP],ax	; Set read point
-	mov	[RBFWTP],ax	; Set write point
-;
-	sti			; Enable interrupt
-;;
-;;	Check CPU
-;	mov	si,offset ckcpu	;set message top
-;	call	puts		;display message
-;;
-;	mov	ax,0101h
-;	db	0d5h,10h	;aad 10h
-;	cmp	al,0bh		;NEC V20 ignores the argument
-;	je	isv20		;If V20, skip follw 3 step
-;	mov	si,offset intel	;8088 message
-;	call	puts		;Out it
-;	jmps	$		;Stop
-;isV20:	call	puts		;V20 message
-;;
-;;	Emulation sequence
-;;	db	0fh,0ffh	;BRKEM
-;;	db	offset VBRKEM/4	;Vector number
-
-	JMP	PROG_CODE
+start:
+    cli
+; --- セグメントレジスタの統一 (RAM実行用) ---
+    mov     ax, cs          ; 現在のCS（おそらく0000h）を取得
+    mov     ds, ax          ; DS = CS にする（これでデータアクセスが正しくなる）
+    mov     es, ax          ; ES も同じに
+    mov     ss, ax          ; SS も同じに
+    mov     sp, SYSSTK      ; スタックポインタ設定
+    
+    ; 出力抑制フラグ（DS:CTLOFG）を確実に 0 に叩く
+    mov     byte [CTLOFG], 0 ;
+    sti
+    jmp     PROG_CODE        ;
 
 ;;
 ;;	Returned native mode
@@ -240,14 +146,20 @@ start:	mov	ax,cs		; Set com model
 ;       TARGET: SBC8080
 ;       ASSEMBLER: ARCPIT XZ80.EXE
 ;
-	ORG	EMROM
-;
+;	ORG	EMROM
+
+; EMROM (0x8200) から ROM開始位置 (0x8000) を引いた「オフセット値(0x200)」を目標にします。
+; ($ - $$) は「ファイルの先頭からの現在のバイト数」を表す純粋な数値になります。
+
+times 0x200 - ($ - $$) db 0x00;
+
 ;       START BASIC
 PROG_CODE:
 	JMP	COLD
 
 CHKCHR:
-	MOV	AL,[RBFCNT]
+	;MOV	AL,[RBFCNT]
+	MOV	AL,0
 	CMP	AL,00H
 	RET
 
@@ -371,7 +283,7 @@ OM	EQU	0CH	; Out of memory
 UL	EQU	0EH	; Undefined line number
 BS	EQU	10H	; Bad subscript
 RD	EQU	12H	; Re-DIMensioned array
-DZ	EQU	14H	; Division by zero (/0)
+_DZ	EQU	14H	; Division by zero (/0)
 ID	EQU	16H	; Illegal direct
 TM	EQU	18H	; Type miss-match
 OS	EQU	1AH	; Out of string space
@@ -394,8 +306,8 @@ STARTB:
 	DW	ABPASS			; Return integer in AB
 ;
 CSTART:
-	MOV	BX,WRKSPC		; Start of workspace RAM
-	MOV	SP,BX			; Set up a temporary stack
+	;MOV	BX,WRKSPC		; Start of workspace RAM
+	;MOV	SP,BX			; Set up a temporary stack
 	JMP	INITST			; Go to initialise
 ;
 INIT:
@@ -415,13 +327,16 @@ COPY:
 ;	SAHF
 	DEC	CH			; Count bytes
 	JNZ	COPY			; More to move
-	MOV	SP,BX			; Temporary stack
+	;MOV	SP,BX			; Temporary stack
 	CALL	CLREG			; Clear registers and stack
 	CALL	PRCRLF			; Output CRLF
 	MOV	[BUFFER+72+1],AL	; Mark end of buffe
 	MOV	[PROGST],AL  		; Initialise program area
 MSIZE:
-	MOV	BX,STLOOK		; Point to start of RAM
+	;MOV	BX,STLOOK		; Point to start of RAM
+	mov	bx, 0x8000
+	jmp	SETTOP
+
 MLOOP:
 	LAHF
 	INC	BX			; Next byte
@@ -467,7 +382,8 @@ SETTOP:
 	MOV	BX,BFREE		; " Bytes free" message
 	CALL	PRS			; Output string
 WARMST:
-	MOV	SP,STACK		; Temporary stack
+	;MOV	SP,STACK		; Temporary stack
+	MOV	SP,SYSSTK		; Temporary stack
 BRKRET:
 	CALL	CLREG			; Clear registers and s
 	JMP	PRNTOK			; Go to get command lin
@@ -494,8 +410,8 @@ MEMMSG:
 ;
 FNCTAB:
 	DW	SGN
-	DW	INT
-	DW	ABS
+	DW	_INT
+	DW	_ABS
 	DW	USR
 	DW	FRE
 	DW	INP
@@ -636,7 +552,7 @@ WORDTB:
 	DW	POUT
 	DW	ON
 	DW	NULL
-	DW	WAIT
+	DW	_WAIT
 	DW	DEF
 	DW	POKE
 	DW	DOKE
@@ -889,7 +805,7 @@ SNERR:
 	MOV	DL,SN			; ?SN Error
 	JMP	ERROR
 DZERR:
-	MOV	DL,DZ			; ?/0 Error
+	MOV	DL,_DZ			; ?/0 Error
 	JMP	ERROR
 NFERR:
 	MOV	DL,NF			; ?NF Error
@@ -1156,8 +1072,8 @@ INTVAR:
 ;
 CLREG:
 	POP	CX			; Save return address
-	MOV	BX,[STRSPC]		; Get end of working RAM
-	MOV	SP,BX			; Set stack
+	;MOV	BX,[STRSPC]		; Get end of working RAM
+	;MOV	SP,BX			; Set stack
 	MOV	BX,TMSTPL		; Temporary string pool
 	MOV	[TMSTPT],BX		; Reset temporary string ptr
 	XOR	AL,AL			; A = 00
@@ -1436,7 +1352,7 @@ PROCES3:
 	PUSH	CX			; Save buffer length
 	PUSH	DX			; Save DE
 	PUSH	BX			; Save buffer address
-	MOV	BYTE PTR [BX],0		; Mark end of buffer
+	MOV	BYTE [BX],0		; Mark end of buffer
 	CALL	OUTNCR			; Output and do CRLF
 	MOV	BX,BUFFER		; Point to buffer start
 	CALL	PRS			; Output buffer
@@ -2340,9 +2256,9 @@ PRNTLP5:
 	JNZ	PRNTST			; Yes - Output string contents
 	CALL	NUMASC			; Convert number to text
 	CALL	CRTST			; Create temporary strig
-	MOV	BYTE PTR [BX],' '	; Followed by a space
+	MOV	BYTE [BX],' '	; Followed by a space
 	MOV	BX,[FPREG]		; Get length of output
-	INC	BYTE PTR [BX]		; Plus 1 for the space
+	INC	BYTE [BX]		; Plus 1 for the space
 	MOV	BX,[FPREG]		; < Not needed >
 	MOV	AL,[LWIDTH]		; Get width of line
 	MOV	CH,AL			; To B
@@ -2373,7 +2289,7 @@ STTLIN:
 ;	JMP	PRCRLF			; Start a new line
 ;
 ENDINP:
-	MOV	BYTE PTR [BX],0		; Mark end of buffer
+	MOV	BYTE [BX],0		; Mark end of buffer
 	MOV	BX,BUFFER-1		; Point to buffer
 PRCRLF:
 	MOV	AL,CR			; Load a CR
@@ -2498,7 +2414,7 @@ NOPMPT2:
 	JNZ	NOPMPT3			; Yes - Find next DATA stmt
 	JMP	NXTDTA
 NOPMPT3:
-	MOV	BYTE PTR [BX],','	; Store comma as separator
+	MOV	BYTE [BX],','	; Store comma as separator
 	JMP	NXTITM			; Get next item
 ;
 READ:
@@ -3284,7 +3200,7 @@ ZEROLP:
 	LAHF
 	DEC	BX			; Back through to zero variable
 	SAHF
-	MOV	BYTE PTR [BX],0		; Zero byte in variable
+	MOV	BYTE [BX],0		; Zero byte in variable
 	CALL	CPDEHL			; Done them all?
 	JNZ	ZEROLP			; No - Keep on going
 	POP	DX			; Get variable name
@@ -3476,7 +3392,7 @@ ZERARY:
 	LAHF
 	DEC	BX			; Back through array data
 	SAHF
-	MOV	BYTE PTR [BX],0		; Set array element to zero
+	MOV	BYTE [BX],0		; Set array element to zero
 	CALL	CPDEHL			; All elements zeroed?
 	JNZ	ZERARY			; No - Keep on going
 	LAHF
@@ -4389,7 +4305,7 @@ POUT:
 	CALL	SETIO			; Set up port number
 	JMP	OUTSUB			; Output data and return
 ;
-WAIT:
+_WAIT:
 	CALL	SETIO			; Set up port number
 	LAHF
 	XCHG	AH,AL
@@ -4519,7 +4435,7 @@ NOSWAP2:
 	LAHF
 	INC	BX			; Point to exponent
 	SAHF
-	INC	BYTE PTR [BX]		; Increment it
+	INC	BYTE [BX]		; Increment it
 	JNZ	NOSWAP3			; Number overflowed - Error
 	JMP	OVERR
 NOSWAP3:
@@ -4627,7 +4543,7 @@ FPROND2:
 	RET				; Return if ok
 FPROND3:
 	MOV	CL,80H			; Set normal value
-	INC	BYTE PTR [BX]		; Increment exponent
+	INC	BYTE [BX]		; Increment exponent
 	JZ	FPROND4
 	RET				; Return if ok
 FPROND4:
@@ -4840,8 +4756,8 @@ DVBCDE:
 DVBCDE1:
 	MOV	BL,-1			; Flag subtract exponents
 	CALL	ADDEXP			; Subtract exponents
-	INC	BYTE PTR [BX]		; Add 2 to exponent to adjust
-	INC	BYTE PTR [BX]
+	INC	BYTE [BX]		; Add 2 to exponent to adjust
+	INC	BYTE [BX]
 ;	LAHF
 	DEC	BX			; Point to MSB
 ;	SAHF
@@ -4916,7 +4832,7 @@ RESDIV2:
 	JNZ	DIVLP			; Not done - Keep dividing
 	PUSH	BX			; Save divisor
 	MOV	BX,FPEXP		; Point to exponent
-	DEC	BYTE PTR [BX]		; Divide by 2
+	DEC	BYTE [BX]		; Divide by 2
 	POP	BX			; Restore divisor
 	JNZ	DIVLP			; Ok - Keep going
 	JMP	OVERR			; Overflow error
@@ -4973,7 +4889,7 @@ MLSP102:
 	MOV	CH,AL			; Re-save exponent
 	CALL	FPADD			; Add BCDE to FPREG (Time 5)
 	MOV	BX,FPEXP		; Point to exponent
-	INC	BYTE PTR [BX]		; Double number (Times 10)
+	INC	BYTE [BX]		; Double number (Times 10)
 	JZ	MLSP103
 	RET				; Ok - Return
 MLSP103:
@@ -5015,11 +4931,11 @@ RETINT:
 ;	LAHF
 	INC	BX			; Point to sign of result
 ;	SAHF
-	MOV	BYTE PTR [BX],80H	; Set sign of result
+	MOV	BYTE [BX],80H	; Set sign of result
 	RCL	AL,1			; Carry = sign of integer
 	JMP	CONPOS			; Set sign of result
 ;
-ABS:
+_ABS:
 	CALL	TSTSGN			; Test sign of FPREG
 	JS	INVSGN
 	RET				; Return if positive
@@ -5227,7 +5143,7 @@ DCBCDE1:
 	SAHF
 	RET
 ;
-INT:
+_INT:
 	MOV	BX,FPEXP		; Point to exponent
 	MOV	AL,[BX]			; Get exponent
 	CMP	AL,80H+24		; Integer accuracy only?
@@ -5237,7 +5153,7 @@ INT:
 INT1:
 	MOV	AL,[BX]			; Get exponent
 	CALL	FPINT			; F.P to integer
-	MOV	BYTE PTR [BX],80H+24	; Save 24 bit integer
+	MOV	BYTE [BX],80H+24	; Save 24 bit integer
 	MOV	AL,DL			; Get LSB of number
 	LAHF
 	XCHG	AH,AL
@@ -5417,14 +5333,14 @@ NUMASC:
 	MOV	BX,PBUFF		; Convert number to ASCII
 	PUSH	BX			; Save for return
 	CALL	TSTSGN			; Test sign of FPREG
-	MOV	BYTE PTR [BX],' '	; Space at start
+	MOV	BYTE [BX],' '	; Space at start
 	JNS	SPCFST			; Positive - Space to start
-	MOV	BYTE PTR [BX],'-'	; '-' sign at start
+	MOV	BYTE [BX],'-'	; '-' sign at start
 SPCFST:
 	LAHF
 	INC	BX			; First byte of number
 	SAHF
-	MOV	BYTE PTR [BX],'0'	; '0' if zero
+	MOV	BYTE [BX],'0'	; '0' if zero
 	JNZ	SPCFST1			; Return '0' if zero
 	JMP	JSTZER
 SPCFST1:
@@ -5494,17 +5410,17 @@ MAKNUM:
 	MOV	DX,POWERS		; Powers of ten
 	DEC	CH			; Count digits before point
 	JNZ	DIGTXT			; Not zero - Do number
-	MOV	BYTE PTR [BX],'.'	; Save point
+	MOV	BYTE [BX],'.'	; Save point
 	LAHF
 	INC	BX			; Move on
 	SAHF
-	MOV	BYTE PTR [BX],'0'	; Save zero
+	MOV	BYTE [BX],'0'	; Save zero
 	LAHF
 	INC	BX			; Move on
 	SAHF
 DIGTXT:
 	DEC	CH			; Count digits before point
-	MOV	BYTE PTR [BX],'.'	; Save point in case
+	MOV	BYTE [BX],'.'	; Save point in case
 	JNZ	DIGTXT1
 	CALL	INCHL			; Last digit - move on
 DIGTXT1:
@@ -5570,13 +5486,13 @@ DOEBIT:
 	XCHG	AH,AL
 	SAHF
 	JZ	NOENED			; No 'E' needed - End buffer
-	MOV	BYTE PTR [BX],'E'	; Put 'E' in buffer
+	MOV	BYTE [BX],'E'	; Put 'E' in buffer
 	LAHF
 	INC	BX			; And move on
 	SAHF
-	MOV	BYTE PTR [BX],'+'	; Put '+' in buffer
+	MOV	BYTE [BX],'+'	; Put '+' in buffer
 	JNS	OUTEXP			; Positive - Output exponent
-	MOV	BYTE PTR [BX],'-'	; Put '-' in buffer
+	MOV	BYTE [BX],'-'	; Put '-' in buffer
 	NOT	AL			; Negate exponent
 	INC	AL
 OUTEXP:
@@ -5663,7 +5579,7 @@ POWER5:
 	JNS	POWER2			; Positive base - Ok
 	PUSH	DX			; Save power
 	PUSH	CX
-	CALL	INT			; Get integer of power
+	CALL	_INT			; Get integer of power
 	POP	CX			; Restore power
 	POP	DX
 	LAHF
@@ -5702,7 +5618,7 @@ EXP:
 	JC	EXP1			; No - Test for overflow
 	JMP	OVTST1
 EXP1:
-	CALL	INT			; Get INT of FPREG
+	CALL	_INT			; Get INT of FPREG
 	ADD	AL,80H			; For excess 128
 	ADD	AL,2			; Exponent > 126?
 	JNC	EXP2			; Yes - Test for overflow
@@ -5828,14 +5744,14 @@ RND1:
 	MOV	DL,CL			; LSB = MSB
 	XOR	AL,01001111B		; Fiddle around
 	MOV	CL,AL			; New MSB
-	MOV	BYTE PTR [BX],80H	; Set exponent
+	MOV	BYTE [BX],80H	; Set exponent
 ;	LAHF
 	DEC	BX			; Point to MSB
 ;	SAHF
 	MOV	CH,[BX]			; Get MSB
-	MOV	BYTE PTR [BX],80H	; Make value -0.5
+	MOV	BYTE [BX],80H	; Make value -0.5
 	MOV	BX,SEED			; Random number seed
-	INC	BYTE PTR [BX]		; Count seed
+	INC	BYTE [BX]		; Count seed
 	MOV	AL,[BX]			; Get seed
 	SUB	AL,171			; Do it modulo 171
 	JNZ	RND2			; Non-zero - Ok
@@ -5877,7 +5793,7 @@ SIN:
 	POP	DX
 	CALL	DVBCDE			; Divide angle by 2 PI
 	CALL	STAKFP			; Put it on stack
-	CALL	INT			; Get INT of result
+	CALL	_INT			; Get INT of result
 	POP	CX			; Restore number
 	POP	DX
 	CALL	SUBCDE			; Make it 0 <= value < 1
@@ -6266,7 +6182,7 @@ OUTNCR:
 ;
 
 ;	Reset
-	ORG	0FFF0h
-	JMPF	0000:start
-
-	END
+;	ORG	0FFF0h
+;	JMPF	0000:start
+;
+;	END
