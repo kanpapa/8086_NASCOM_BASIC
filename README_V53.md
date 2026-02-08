@@ -4,8 +4,9 @@ Nascom BASICはマイクロソフトが作成し、Grant Searleさんがサブ�
 
 ファイルは原作者の宣言にしたがってご利用ください。  
 
-ターゲット VMEボード DVE-V53/12 CPU:V53 16MHz. 
-アセンブラ  NASM version 2.15.05  
+* ターゲット VMEボード DVE-V53/12
+* CPU V53 16MHz
+* アセンブラ  NASM version 2.15.05  
 
 ## 変更点
 * RAMベースで動作するように変更しました。
