@@ -6,6 +6,10 @@
 ;	SBCV20 NASCOM BASIC
 ;	Assembler: asm86.com/asm86.cmd
 ;
+;	V53 VME NASCOM BASIC
+;	Assembler: NASM version 2.15.05
+;
+
 
 ;	CPU	8086
 ;	ASSUME	CS:CODE, DS:DATA, SS:DATA, ES:NOTHING
